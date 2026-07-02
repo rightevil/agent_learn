@@ -3,44 +3,40 @@ import { z } from "zod";
 import { spawn } from "node:child_process";
 import { logger } from "../../logger.js";
 
-const ALLOWED_COMMANDS = ["ls", "cat", "grep", "git", "npm", "pnpm", "node", "dir", "type", "findstr"];
+const ALLOWED_COMMANDS = ["ls", "cat", "grep", "git", "npm", "pnpm", "node", "dir", "type", "findstr", "pwd", "cd", "echo", "mkdir", "cp", "mv", "copy", "move"];
 const BLOCKED_COMMANDS = ["rm", "sudo", "chmod", "curl", "wget", "del", "erase", "rd", "rmdir"];
 
-// Unix ls flags that have no meaning for Windows dir — just strip them
-const STRIP_ARGS = new Set(["-l", "-la", "-al", "-a", "-h", "-lh", "-F", "--color=auto"]);
+function stripUnixFlags(args: string[]): string[] {
+  // Windows cmd uses /flags, not -flags. Strip anything starting with -
+  return args.filter((a) => !a.startsWith("-"));
+}
 
 function normalizeWinPath(arg: string): string {
-  // Convert forward slashes to backslashes for Windows paths
   if (process.platform === "win32" && /^[a-zA-Z]:[\\/]/.test(arg)) {
     return arg.replace(/\//g, "\\");
   }
   return arg;
 }
 
+/** Strip Unix flags + normalize paths — used by most cmd-mapped commands */
+function winArgs(args: string[]): string[] {
+  return stripUnixFlags(args).map(normalizeWinPath);
+}
+
 // On Windows, map Unix commands and cmd built-ins to spawn-able equivalents
 const WIN_CMD_MAP: Record<string, { cmd: string; mapArgs: (args: string[]) => string[] }> = {
-  ls: {
-    cmd: "cmd",
-    mapArgs: (args) => {
-      // Strip Unix flags, keep only path arguments
-      const filtered = args
-        .filter((a) => !STRIP_ARGS.has(a) && !a.startsWith("-"))
-        .map(normalizeWinPath);
-      return ["/c", "dir", ...filtered];
-    },
-  },
-  dir: {
-    cmd: "cmd",
-    mapArgs: (args) => ["/c", "dir", ...args.map(normalizeWinPath)],
-  },
-  cat: {
-    cmd: "cmd",
-    mapArgs: (args) => ["/c", "type", ...args.map(normalizeWinPath)],
-  },
-  grep: {
-    cmd: "findstr",
-    mapArgs: (args) => args,
-  },
+  ls:    { cmd: "cmd", mapArgs: (a) => ["/c", "dir", ...winArgs(a)] },
+  dir:   { cmd: "cmd", mapArgs: (a) => ["/c", "dir", ...winArgs(a)] },
+  cat:   { cmd: "cmd", mapArgs: (a) => ["/c", "type", ...winArgs(a)] },
+  cd:    { cmd: "cmd", mapArgs: (a) => ["/c", "cd", ...winArgs(a)] },
+  mkdir: { cmd: "cmd", mapArgs: (a) => ["/c", "mkdir", ...winArgs(a)] },
+  cp:    { cmd: "cmd", mapArgs: (a) => ["/c", "copy", ...winArgs(a)] },
+  mv:    { cmd: "cmd", mapArgs: (a) => ["/c", "move", ...winArgs(a)] },
+  copy:  { cmd: "cmd", mapArgs: (a) => ["/c", "copy", ...winArgs(a)] },
+  move:  { cmd: "cmd", mapArgs: (a) => ["/c", "move", ...winArgs(a)] },
+  pwd:   { cmd: "cmd", mapArgs: () => ["/c", "cd"] },
+  echo:  { cmd: "cmd", mapArgs: (a) => ["/c", "echo", ...a] },
+  grep:  { cmd: "findstr", mapArgs: (a) => a },
 };
 
 function validateCommand(command: string, args: string[]): void {
@@ -102,6 +98,14 @@ export const runCmdTool = tool({
     args: z.array(z.string()).default([]).describe("Arguments to pass to the command"),
   }),
   execute: async ({ command, args }: { command: string; args: string[] }) => {
+    // If the agent packed everything into command (e.g. "mkdir -p first"),
+    // split it so args aren't lost
+    if (args.length === 0 && /\s+/.test(command.trim())) {
+      const parts = command.trim().split(/\s+/);
+      command = parts[0];
+      args = parts.slice(1);
+    }
+
     logger.tool("run_cmd", `${command} ${args.join(" ")}`);
     try {
       validateCommand(command, args);
