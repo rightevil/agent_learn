@@ -169,7 +169,7 @@ async function main(prompt: string | undefined, options: { file?: string; model?
       messages,
       tools: await buildTools(options.mcp || false),
       maxTokens: config.LLM_MAX_OUTPUT_TOKENS,
-      maxSteps: 5,
+      maxSteps: 10,
     });
 
     spinner.stop();
@@ -264,7 +264,7 @@ async function interactiveSession(
         messages,
         tools: await buildTools(enableMcp),
         maxTokens: config.LLM_MAX_OUTPUT_TOKENS,
-        maxSteps: 5,
+        maxSteps: 10,
       });
 
       spinner.stop();
