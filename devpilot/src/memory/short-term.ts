@@ -96,3 +96,26 @@ export function deleteConversation(id: string): void {
   const database = getDb();
   database.prepare("DELETE FROM conversations WHERE id = ?").run(id);
 }
+
+/**
+ * Resolve a possibly-short conversation ID to a full UUID.
+ * If the given id already exists in the database, return it as-is.
+ * Otherwise, do a prefix match (LIKE "xxx%") and return the most
+ * recent match. Returns null if nothing matches.
+ */
+export function resolveConversationId(shortId: string): string | null {
+  const database = getDb();
+
+  // 1. Exact match
+  const exact = database.prepare(
+    "SELECT id FROM conversations WHERE id = ?"
+  ).get(shortId) as { id: string } | undefined;
+  if (exact) return exact.id;
+
+  // 2. Prefix match — return the most recently updated
+  const rows = database.prepare(
+    "SELECT id FROM conversations WHERE id LIKE ? ORDER BY updated_at DESC LIMIT 1"
+  ).all(`${shortId}%`) as { id: string }[];
+
+  return rows[0]?.id ?? null;
+}

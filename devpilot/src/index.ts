@@ -15,6 +15,7 @@ import {
   saveConversation,
   loadConversation,
   listConversations,
+  resolveConversationId,
 } from "./memory/short-term.js";
 import { loadProfile, saveProfile, isFirstRun } from "./memory/user-profile.js";
 import { shouldSummarize, buildSummarizationPrompt, compactMessages } from "./memory/summarizer.js";
@@ -63,7 +64,7 @@ function showConversationList() {
     const msgCount = conv.messages.length;
     const preview = conv.messages[0]?.content.slice(0, 60) ?? "(empty)";
     console.log(
-      `  ${chalk.cyan(conv.id.slice(0, 8))}  ${conv.updatedAt}  ${msgCount} msgs  "${preview}..."`
+      `  ${chalk.cyan(conv.id)}  ${conv.updatedAt}  ${msgCount} msgs  "${preview}..."`
     );
   }
   console.log();
@@ -101,14 +102,22 @@ async function main(prompt: string | undefined, options: { file?: string; model?
   }
 
   // --- Load or create conversation ---
-  const convId = options.continue || randomUUID();
+  let convId = options.continue;
+  if (convId) {
+    const resolved = resolveConversationId(convId);
+    if (resolved) {
+      convId = resolved;
+    }
+    // If no match found, treat the short id as a new conversation id
+  }
+  convId = convId || randomUUID();
   const existingConv = loadConversation(convId);
 
   const modelName = options.model || config.LLM_MODEL;
   logger.info(`Provider: ${config.LLM_PROVIDER} | Model: ${modelName}`);
 
   if (existingConv) {
-    logger.info(`Continuing conversation ${convId.slice(0, 8)} (${existingConv.messages.length} messages)`);
+    logger.info(`Continuing conversation ${convId} (${existingConv.messages.length} messages)`);
   }
 
   // --- Build the user message ---
@@ -193,7 +202,7 @@ async function main(prompt: string | undefined, options: { file?: string; model?
       { role: "assistant", content: result.text },
     ];
     saveConversation(convId, updatedMessages);
-    logger.info(`Conversation saved (id: ${convId.slice(0, 8)})`);
+    logger.info(`Conversation saved (id: ${convId})`);
 
     // Save to long-term memory for future cross-session recall
     addMemory(userMessage, result.text).catch(() => {});
@@ -223,7 +232,7 @@ async function interactiveSession(
     if (!userInput.trim()) continue;
     if (userInput === "/exit") {
       saveConversation(convId, messages);
-      logger.info(`Conversation saved (id: ${convId.slice(0, 8)}). Goodbye!`);
+      logger.info(`Conversation saved (id: ${convId}). Goodbye!`);
       break;
     }
     if (userInput === "/help") {
