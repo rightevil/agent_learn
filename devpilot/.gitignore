@@ -1,0 +1,8 @@
+/first-ts/
+.claude/
+.env
+node_modules/
+data/
+tests
+CLAUDE.md
+ts_nodejs_getting_started.md

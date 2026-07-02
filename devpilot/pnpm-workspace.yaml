@@ -1,0 +1,11 @@
+packages:
+  - "."
+
+allowBuilds:
+  better-sqlite3: false
+  esbuild: false
+
+onlyBuiltDependencies: '["better-sqlite3","esbuild"]'
+
+overrides:
+  zod-to-json-schema: "3.23.5"
