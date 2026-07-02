@@ -6,11 +6,41 @@ import { logger } from "../../logger.js";
 const ALLOWED_COMMANDS = ["ls", "cat", "grep", "git", "npm", "pnpm", "node", "dir", "type", "findstr"];
 const BLOCKED_COMMANDS = ["rm", "sudo", "chmod", "curl", "wget", "del", "erase", "rd", "rmdir"];
 
-// On Windows, map Unix commands to their Windows equivalents
+// Unix ls flags that have no meaning for Windows dir — just strip them
+const STRIP_ARGS = new Set(["-l", "-la", "-al", "-a", "-h", "-lh", "-F", "--color=auto"]);
+
+function normalizeWinPath(arg: string): string {
+  // Convert forward slashes to backslashes for Windows paths
+  if (process.platform === "win32" && /^[a-zA-Z]:[\\/]/.test(arg)) {
+    return arg.replace(/\//g, "\\");
+  }
+  return arg;
+}
+
+// On Windows, map Unix commands and cmd built-ins to spawn-able equivalents
 const WIN_CMD_MAP: Record<string, { cmd: string; mapArgs: (args: string[]) => string[] }> = {
-  ls: { cmd: "cmd", mapArgs: (args) => ["/c", "dir", ...args] },
-  cat: { cmd: "cmd", mapArgs: (args) => ["/c", "type", ...args] },
-  grep: { cmd: "findstr", mapArgs: (args) => args },
+  ls: {
+    cmd: "cmd",
+    mapArgs: (args) => {
+      // Strip Unix flags, keep only path arguments
+      const filtered = args
+        .filter((a) => !STRIP_ARGS.has(a) && !a.startsWith("-"))
+        .map(normalizeWinPath);
+      return ["/c", "dir", ...filtered];
+    },
+  },
+  dir: {
+    cmd: "cmd",
+    mapArgs: (args) => ["/c", "dir", ...args.map(normalizeWinPath)],
+  },
+  cat: {
+    cmd: "cmd",
+    mapArgs: (args) => ["/c", "type", ...args.map(normalizeWinPath)],
+  },
+  grep: {
+    cmd: "findstr",
+    mapArgs: (args) => args,
+  },
 };
 
 function validateCommand(command: string, args: string[]): void {
