@@ -1,4 +1,5 @@
 import { Annotation } from "@langchain/langgraph";
+import type { Message } from "../types.js";
 
 /**
  * AgentState defines the shared state that flows through the
@@ -7,6 +8,9 @@ import { Annotation } from "@langchain/langgraph";
 export const AgentStateAnnotation = Annotation.Root({
   /** The user's original request */
   task: Annotation<string>,
+
+  /** Full conversation history (optional, for context-aware decisions) */
+  messages: Annotation<Message[]>,
 
   /** The code produced by the Coder agent */
   coderOutput: Annotation<string>,

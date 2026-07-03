@@ -9,9 +9,12 @@ import { assertSafePath } from "../../utils/path.js";
 export const readFileTool = tool({
   description: "Read the contents of a file from the local filesystem. Returns the file content as text.",
   parameters: z.object({
-    filePath: z.string().describe("Absolute path to the file to read"),
+    filePath: z.string().default("").describe("Absolute path to the file to read"),
   }),
   execute: async ({ filePath }: { filePath: string }) => {
+    if (!filePath) {
+      return "Error: tool called without a filePath. Please specify the absolute path to the file to read.";
+    }
     logger.tool("read_file", `Reading ${filePath}`);
     try {
       assertSafePath(filePath);
@@ -30,10 +33,16 @@ export const readFileTool = tool({
 export const writeFileTool = tool({
   description: "Write content to a file on the local filesystem. Creates directories if needed.",
   parameters: z.object({
-    filePath: z.string().describe("Absolute path to the file to write"),
-    content: z.string().describe("Content to write to the file"),
+    filePath: z.string().default("").describe("Absolute path to the file to write"),
+    content: z.string().default("").describe("Content to write to the file"),
   }),
   execute: async ({ filePath, content }: { filePath: string; content: string }) => {
+    if (!filePath) {
+      return "Error: tool called without a filePath. Please specify the absolute path to write to.";
+    }
+    if (!content) {
+      return "Error: tool called without content. Please provide the content to write.";
+    }
     logger.tool("write_file", `Writing to ${filePath}`);
     try {
       assertSafePath(filePath);

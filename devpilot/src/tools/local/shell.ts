@@ -3,7 +3,7 @@ import { z } from "zod";
 import { spawn } from "node:child_process";
 import { logger } from "../../logger.js";
 
-const ALLOWED_COMMANDS = ["ls", "cat", "grep", "git", "npm", "pnpm", "node", "dir", "type", "findstr", "pwd", "cd", "echo", "mkdir", "cp", "mv", "copy", "move"];
+const ALLOWED_COMMANDS = ["ls", "cat", "grep", "git", "npm", "pnpm", "npx", "node", "python", "py", "dir", "type", "findstr", "pwd", "cd", "echo", "mkdir", "cp", "mv", "copy", "move"];
 const BLOCKED_COMMANDS = ["rm", "sudo", "chmod", "curl", "wget", "del", "erase", "rd", "rmdir"];
 
 function stripUnixFlags(args: string[]): string[] {
@@ -94,13 +94,37 @@ function spawnCommand(command: string, args: string[]): Promise<string> {
 export const runCmdTool = tool({
   description: "Run a safe shell command and return the output. Only whitelisted commands are allowed.",
   parameters: z.object({
-    command: z.string().describe("The command to run (e.g. 'git', 'npm', 'ls')"),
-    args: z.array(z.string()).default([]).describe("Arguments to pass to the command"),
+    command: z.string().default("").describe("The command to run (e.g. 'git', 'npm', 'ls')"),
+    args: z.union([
+      z.array(z.string()),
+      z.string().transform((s) => {
+        try { return JSON.parse(s) as string[]; } catch { return [s]; }
+      }),
+    ]).default([]).describe("Arguments to pass to the command"),
   }),
   execute: async ({ command, args }: { command: string; args: string[] }) => {
+    // Guard against LLM producing a call with no command
+    if (!command) {
+      return "Error: tool called without a command. Please specify a command to run (e.g. ls, dir, git, npm).";
+    }
+
     // If the agent packed everything into command (e.g. "mkdir -p first"),
     // split it so args aren't lost
     if (args.length === 0 && /\s+/.test(command.trim())) {
+      // If the command contains quotes, don't split — pass raw to shell
+      if (/["']/.test(command)) {
+        logger.tool("run_cmd", `(raw) ${command}`);
+        const shell = process.platform === "win32" ? "cmd" : "sh";
+        const flag = process.platform === "win32" ? "/c" : "-c";
+        try {
+          validateCommand(command, []);
+          const result = await spawnCommand(shell, [flag, command]);
+          return result;
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          return `Error running command: ${msg}`;
+        }
+      }
       const parts = command.trim().split(/\s+/);
       command = parts[0];
       args = parts.slice(1);

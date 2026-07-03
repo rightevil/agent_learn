@@ -6,6 +6,7 @@ import { runCmdTool } from "../tools/local/shell.js";
 import { AGENT_PROMPTS } from "./prompts.js";
 import { logger } from "../logger.js";
 import { loadProfile } from "../memory/user-profile.js";
+import type { Message } from "../types.js";
 
 /**
  * Coder agent: generates code based on the task specification.
@@ -13,6 +14,7 @@ import { loadProfile } from "../memory/user-profile.js";
  */
 export async function coderNode(state: {
   task: string;
+  messages: Message[];
   coderOutput: string;
   reviewResult: string;
   retryCount: number;
@@ -27,7 +29,6 @@ export async function coderNode(state: {
     reasoningEffort: "max",
   });
 
-  // Build the prompt with any reviewer feedback from previous attempts
   let prompt = `Task:\n${state.task}`;
 
   if (state.reviewResult && state.retryCount > 0) {
@@ -38,10 +39,20 @@ export async function coderNode(state: {
     ? `\n\nUser preferences: language=${profile.language}, style=${profile.codeStyle}`
     : "";
 
+  // Include recent conversation context for file paths etc.
+  const recentMsgs = (state.messages ?? []).slice(-4);
+  const contextMessages = recentMsgs.map(m => ({
+    role: m.role as "user" | "assistant" | "system",
+    content: m.content.slice(0, 500),
+  }));
+
   const result = await generateText({
     model: llm,
     system: AGENT_PROMPTS.coder + styleHint,
-    prompt,
+    messages: [
+      ...contextMessages,
+      { role: "user", content: prompt },
+    ],
     tools: {
       read_file: readFileTool,
       write_file: writeFileTool,
@@ -61,6 +72,7 @@ export async function coderNode(state: {
 
   return {
     task: state.task,
+    messages: state.messages,
     coderOutput: result.text,
     reviewResult: state.reviewResult,
     retryCount: state.retryCount,

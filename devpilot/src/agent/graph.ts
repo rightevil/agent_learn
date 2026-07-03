@@ -4,6 +4,7 @@ import { orchestratorNode } from "./orchestrator.js";
 import { coderNode } from "./coder-agent.js";
 import { reviewerNode, MAX_RETRIES } from "./reviewer-agent.js";
 import { logger } from "../logger.js";
+import type { Message } from "../types.js";
 
 /**
  * Decide what to do after the orchestrator analyzes the task.
@@ -78,12 +79,14 @@ export function buildAgentGraph() {
 
 /**
  * Run the multi-agent pipeline for a given task.
+ * Pass conversation messages for context-aware decisions.
  */
-export async function runAgentPipeline(task: string): Promise<string> {
+export async function runAgentPipeline(task: string, messages: Message[] = []): Promise<string> {
   const graph = buildAgentGraph();
 
   const result = await graph.invoke({
     task,
+    messages,
     coderOutput: "",
     reviewResult: "",
     retryCount: 0,

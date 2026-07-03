@@ -1,10 +1,11 @@
 import { generateText } from "ai";
 import { config } from "../config.js";
 import { createLLM } from "../infra/llm-factory.js";
-import { readFileTool, writeFileTool } from "../tools/local/file-ops.js";
+import { readFileTool } from "../tools/local/file-ops.js";
 import { runCmdTool } from "../tools/local/shell.js";
 import { AGENT_PROMPTS } from "./prompts.js";
 import { logger } from "../logger.js";
+import type { Message } from "../types.js";
 
 interface OrchestratorResult {
   type: "SIMPLE" | "CODE";
@@ -14,9 +15,13 @@ interface OrchestratorResult {
 /**
  * Orchestrator agent: analyzes the user's task and decides whether
  * it's a SIMPLE request (direct answer) or a CODE task (needs coder + reviewer).
+ *
+ * Has read_file and run_cmd access so it can handle simple queries
+ * (read a file, check a directory) without invoking the full coder pipeline.
  */
 export async function orchestratorNode(state: {
   task: string;
+  messages: Message[];
   coderOutput: string;
   reviewResult: string;
   retryCount: number;
@@ -27,11 +32,25 @@ export async function orchestratorNode(state: {
 
   const llm = createLLM(config);
 
+  // Build context from conversation history for better decisions
+  const recentHistory = state.messages?.slice(-6) ?? [];
+  const historyContext = recentHistory.length > 0
+    ? recentHistory.map(m => `[${m.role}] ${m.content.slice(0, 300)}`).join("\n")
+    : "";
+
+  const systemPrompt = AGENT_PROMPTS.orchestrator
+    + (historyContext ? `\n\nRecent conversation history:\n${historyContext}` : "");
+
   const result = await generateText({
     model: llm,
-    system: AGENT_PROMPTS.orchestrator,
+    system: systemPrompt,
     prompt: `User request: ${state.task}`,
-    maxTokens: 1000,
+    tools: {
+      read_file: readFileTool,
+      run_cmd: runCmdTool,
+    },
+    maxTokens: 2000,
+    maxSteps: 5,
   });
 
   const text = result.text;
@@ -42,6 +61,7 @@ export async function orchestratorNode(state: {
   if (parsed.type === "SIMPLE") {
     return {
       task: state.task,
+      messages: state.messages,
       needsReview: false,
       finalOutput: parsed.plan,
       coderOutput: "",
@@ -52,6 +72,7 @@ export async function orchestratorNode(state: {
 
   return {
     task: `${state.task}\n\nSpecification:\n${parsed.plan}`,
+    messages: state.messages,
     needsReview: true,
     finalOutput: "",
     coderOutput: "",

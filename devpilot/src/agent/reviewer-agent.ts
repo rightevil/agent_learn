@@ -4,6 +4,7 @@ import { createLLM } from "../infra/llm-factory.js";
 import { readFileTool } from "../tools/local/file-ops.js";
 import { AGENT_PROMPTS } from "./prompts.js";
 import { logger } from "../logger.js";
+import type { Message } from "../types.js";
 
 interface ReviewResult {
   verdict: "PASS" | "NEEDS_WORK";
@@ -16,6 +17,7 @@ interface ReviewResult {
  */
 export async function reviewerNode(state: {
   task: string;
+  messages: Message[];
   coderOutput: string;
   reviewResult: string;
   retryCount: number;
@@ -43,6 +45,7 @@ export async function reviewerNode(state: {
   if (parsed.verdict === "PASS") {
     return {
       task: state.task,
+      messages: state.messages,
       coderOutput: state.coderOutput,
       reviewResult: "PASS",
       retryCount: state.retryCount,
@@ -53,6 +56,7 @@ export async function reviewerNode(state: {
 
   return {
     task: state.task,
+    messages: state.messages,
     coderOutput: state.coderOutput,
     reviewResult: `NEEDS_WORK\n${parsed.issues}`,
     retryCount: state.retryCount + 1,
