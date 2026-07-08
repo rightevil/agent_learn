@@ -1,17 +1,12 @@
-import { generateText } from "ai";
 import { config } from "../config.js";
 import { createLLM } from "../infra/llm-factory.js";
-import { readFileTool, writeFileTool } from "../tools/local/file-ops.js";
-import { runCmdTool } from "../tools/local/shell.js";
 import { AGENT_PROMPTS } from "./prompts.js";
+import { registry } from "../tools/types.js";
 import { logger } from "../logger.js";
 import { loadProfile } from "../memory/user-profile.js";
+import { generateFull } from "../utils/stream.js";
 import type { Message } from "../types.js";
 
-/**
- * Coder agent: generates code based on the task specification.
- * Has access to file and shell tools.
- */
 export async function coderNode(state: {
   task: string;
   messages: Message[];
@@ -21,7 +16,7 @@ export async function coderNode(state: {
   needsReview: boolean;
   finalOutput: string;
 }) {
-  logger.agent("Coder", "Generating code...");
+  logger.agent("Coder", "Generating...");
 
   const profile = loadProfile();
   const llm = createLLM(config, {
@@ -29,51 +24,40 @@ export async function coderNode(state: {
     reasoningEffort: "max",
   });
 
-  let prompt = `Task:\n${state.task}`;
+  const tools = registry.toAITools();
 
+  let prompt = `Task:\n${state.task}`;
   if (state.reviewResult && state.retryCount > 0) {
-    prompt += `\n\nPrevious review feedback (attempt ${state.retryCount}):\n${state.reviewResult}\n\nPlease fix the issues and regenerate the code.`;
+    prompt += `\n\nPrevious review feedback (attempt ${state.retryCount}):\n${state.reviewResult}\n\nPlease fix the issues.`;
   }
 
   const styleHint = profile.initialized
     ? `\n\nUser preferences: language=${profile.language}, style=${profile.codeStyle}`
     : "";
 
-  // Include recent conversation context for file paths etc.
   const recentMsgs = (state.messages ?? []).slice(-4);
   const contextMessages = recentMsgs.map(m => ({
     role: m.role as "user" | "assistant" | "system",
     content: m.content.slice(0, 500),
   }));
 
-  const result = await generateText({
-    model: llm,
+  const text = await generateFull(llm, {
     system: AGENT_PROMPTS.coder + styleHint,
     messages: [
       ...contextMessages,
       { role: "user", content: prompt },
     ],
-    tools: {
-      read_file: readFileTool,
-      write_file: writeFileTool,
-      run_cmd: runCmdTool,
-    },
+    tools,
     maxTokens: config.LLM_MAX_OUTPUT_TOKENS,
     maxSteps: 10,
   });
 
-  logger.agent("Coder", `Generated ${result.text.length} chars`);
-
-  if (result.toolCalls?.length) {
-    for (const tc of result.toolCalls) {
-      logger.tool(tc.toolName, JSON.stringify(tc.args).slice(0, 120));
-    }
-  }
+  logger.agent("Coder", `Generated ${text.length} chars`);
 
   return {
     task: state.task,
     messages: state.messages,
-    coderOutput: result.text,
+    coderOutput: text,
     reviewResult: state.reviewResult,
     retryCount: state.retryCount,
     needsReview: state.needsReview,

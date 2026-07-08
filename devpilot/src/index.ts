@@ -3,6 +3,7 @@ import { Command } from "commander";
 import ora from "ora";
 import chalk from "chalk";
 import { input, select } from "@inquirer/prompts";
+import { generateText } from "ai";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
@@ -16,6 +17,10 @@ import { loadProfile, saveProfile } from "./memory/user-profile.js";
 import type { Message, UserProfile } from "./types.js";
 import { runAgentPipeline } from "./agent/graph.js";
 import { addMemory, findSimilarTasks } from "./memory/long-term.js";
+import { streamFull, typewriter } from "./utils/stream.js";
+import { createLLM } from "./infra/llm-factory.js";
+import { AGENT_PROMPTS } from "./agent/prompts.js";
+import { registry } from "./tools/types.js";
 
 const program = new Command();
 
@@ -57,6 +62,58 @@ function showConversationList() {
     );
   }
   console.log();
+}
+
+/**
+ * Run with streaming: SIMPLE → real streamText, CODE → graph + typewriter.
+ */
+async function runWithStreaming(
+  task: string,
+  messages: Message[],
+  profile: UserProfile,
+  spinner: ReturnType<typeof ora>,
+): Promise<string> {
+  // Quick orchestrator call to decide SIMPLE vs CODE
+  const llm = createLLM(config);
+  const orchResult = await generateText({
+    model: llm,
+    system: AGENT_PROMPTS.orchestrator,
+    prompt: `User request: ${task}`,
+    maxTokens: 300,
+  });
+
+  const isCode = /TYPE:\s*CODE/i.test(orchResult.text);
+
+  if (!isCode) {
+    // SIMPLE → real streaming: tokens appear as LLM generates them
+    let headerPrinted = false;
+    const fullText = await streamFull(llm, {
+      system: AGENT_PROMPTS.base(profile),
+      messages,
+      tools: registry.toAITools(),
+      maxTokens: config.LLM_MAX_OUTPUT_TOKENS,
+      maxSteps: 10,
+      onFirstChunk: () => spinner.stop(),
+      onChunk: async (chunk) => {
+        if (!headerPrinted) {
+          process.stdout.write(`\n${chalk.bold("DevPilot:")}\n`);
+          headerPrinted = true;
+        }
+        process.stdout.write(chunk);
+        await new Promise(r => setTimeout(r, 5));
+      },
+    });
+    process.stdout.write("\n\n");
+    return fullText;
+  }
+
+  // CODE → LangGraph pipeline + typewriter output
+  const result = await runAgentPipeline(task, messages);
+  spinner.stop();
+  process.stdout.write(`\n${chalk.bold("DevPilot:")}\n`);
+  await typewriter(result);
+  process.stdout.write("\n\n");
+  return result;
 }
 
 async function main(
@@ -117,13 +174,8 @@ async function main(
   const spinner = ora("DevPilot is thinking...").start();
 
   try {
-    const output = await runAgentPipeline(userMessage, allMessages);
+    const output = await runWithStreaming(userMessage, allMessages, profile, spinner);
     spinner.stop();
-
-    console.log();
-    console.log(chalk.bold("DevPilot:"));
-    console.log(output);
-    console.log();
 
     // Save conversation
     const updatedMessages: Message[] = [
@@ -176,13 +228,8 @@ async function interactiveSession(
     const spinner = ora("DevPilot is thinking...").start();
 
     try {
-      const output = await runAgentPipeline(userInput, messages);
+      const output = await runWithStreaming(userInput, messages, profile, spinner);
       spinner.stop();
-
-      console.log();
-      console.log(chalk.bold("DevPilot:"));
-      console.log(output);
-      console.log();
 
       messages.push({ role: "assistant", content: output });
       addMemory(userInput, output).catch(() => {});

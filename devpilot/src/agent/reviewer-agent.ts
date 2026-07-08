@@ -1,9 +1,9 @@
-import { generateText } from "ai";
 import { config } from "../config.js";
 import { createLLM } from "../infra/llm-factory.js";
-import { readFileTool } from "../tools/local/file-ops.js";
+import { registry } from "../tools/types.js";
 import { AGENT_PROMPTS } from "./prompts.js";
 import { logger } from "../logger.js";
+import { generateFull } from "../utils/stream.js";
 import type { Message } from "../types.js";
 
 interface ReviewResult {
@@ -11,10 +11,6 @@ interface ReviewResult {
   issues: string;
 }
 
-/**
- * Reviewer agent: reviews code produced by the Coder agent.
- * Returns PASS if code is acceptable, NEEDS_WORK if rework is required.
- */
 export async function reviewerNode(state: {
   task: string;
   messages: Message[];
@@ -24,22 +20,20 @@ export async function reviewerNode(state: {
   needsReview: boolean;
   finalOutput: string;
 }) {
-  logger.agent("Reviewer", "Reviewing code...");
+  logger.agent("Reviewer", "Reviewing...");
 
   const llm = createLLM(config);
+  const tools = registry.toAITools();
 
-  const result = await generateText({
-    model: llm,
+  const text = await generateFull(llm, {
     system: AGENT_PROMPTS.reviewer,
     prompt: `Task specification:\n${state.task}\n\nCode to review:\n${state.coderOutput}`,
-    tools: {
-      read_file: readFileTool,
-    },
+    tools,
     maxTokens: 2000,
     maxSteps: 3,
   });
 
-  const parsed = parseReviewOutput(result.text);
+  const parsed = parseReviewOutput(text);
   logger.agent("Reviewer", `Verdict: ${parsed.verdict}`);
 
   if (parsed.verdict === "PASS") {
@@ -68,10 +62,8 @@ export async function reviewerNode(state: {
 function parseReviewOutput(text: string): ReviewResult {
   const verdictMatch = text.match(/VERDICT:\s*(PASS|NEEDS_WORK)/i);
   const issuesMatch = text.match(/ISSUES:\s*([\s\S]*?)(?:SUGGESTIONS:|$)/i);
-
   const verdict = verdictMatch?.[1]?.toUpperCase() === "PASS" ? "PASS" : "NEEDS_WORK";
   const issues = issuesMatch?.[1]?.trim() || text;
-
   return { verdict, issues };
 }
 
